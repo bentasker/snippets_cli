@@ -482,7 +482,7 @@ def printSnippetList():
     
 
 
-def doSnippetSearch(title=False):
+def doSnippetSearch(title=False,lang=False):
     ''' Run a search against the sitemap
     '''
     
@@ -501,11 +501,12 @@ def doSnippetSearch(title=False):
     
     for snip in plist['entries']:
         if title and title.lower() in snip['name'].lower():
-            matches.append(snip)
-            continue
+            if not lang or lang.lower() == snip['primarylanguage'].lower():
+                matches.append(snip)
+                continue
 
 
-    print "Search results - title: %s" % (title,)
+    print "Search results - title: %s, lang %s" % (title,lang)
         
     print buildIssueTable(matches)
 
@@ -635,6 +636,11 @@ def processCommand(cmd):
 def parseSearchCmd(cmdlist):
     ''' Handle search commands
     '''
+    
+    
+    if len(cmdlist) >= 4 and cmdlist[2] == "lang":
+        return doSnippetSearch(title=cmdlist[1],lang=cmdlist[3])
+    
     
     return doSnippetSearch(title=cmdlist[1])
 
