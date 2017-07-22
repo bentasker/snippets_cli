@@ -885,7 +885,7 @@ if __name__ == "__main__":
                     display_prompt = ""
                     echo_cmd = True
             else:
-                    display_prompt = "cbtcli> "
+                    display_prompt = "sbtcli> "
                     echo_cmd = False
 
             runInteractive(display_prompt,echo_cmd)
