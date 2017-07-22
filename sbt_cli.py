@@ -53,6 +53,9 @@ if os.path.isfile(os.path.expanduser("~/.sbtcli.settings")):
                 ADDITIONAL_HEADERS.append(h)
 
 
+SNIPPET_URLS = {}
+
+
 class MemCache(dict):
     ''' A rudimentary in-memory cache with several storage areas and classes.
     By default, the permstorage area will get flushed once an hour
@@ -392,6 +395,16 @@ def printSnippet(cid):
     print "NOT IMPLEMENTED"
 
 
+def buildSnippetIDMappings(snippets):
+    ''' Populate a dict mapping URLs to IDs
+    '''
+    
+    for sn in snippets:
+        dictkey = 'snip-%s' % (sn['id'],)
+        if dictkey not in SNIPPET_URLS:
+            SNIPPET_URLS[dictkey] = sn['href']
+            
+    
     
     
 def printSnippetList():
@@ -405,6 +418,11 @@ def printSnippetList():
         print "No Results"
         return
     
+    # This is not the most efficient way to do it, but it'll do for now
+    # update the dict mapping IDs to URLs
+    buildSnippetIDMappings(plist['entries'])
+    
+    # Now output the table
     print buildIssueTable(plist['entries'])
     
 
