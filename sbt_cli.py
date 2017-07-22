@@ -245,7 +245,7 @@ class MemCache(dict):
 
 
 
-def getJSON(url):
+def getJSON(url,ttl=False):
     #print "Fetching %s" % (url,)
     
     # Check whether we have it in cache
@@ -268,7 +268,7 @@ def getJSON(url):
     jsonstr = response.read()
     #print jsonstr
     
-    CACHE.setItem(url,jsonstr)
+    CACHE.setItem(url,jsonstr,ttl=ttl)
     
     return json.loads(jsonstr)
 
@@ -387,7 +387,9 @@ def printSnippet(sid):
         return False
     
     url = "%s%s" % (BASEDIR,urlpath)
-    snip = getJSON(url)
+    
+    # Snippets rarely, if ever, change so we can use a long ttl (30 days)
+    snip = getJSON(url,ttl=2592000)
     
     if not snip or not snip['name']:
         print "Snippet Not Found"
