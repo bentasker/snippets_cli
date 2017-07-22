@@ -673,8 +673,8 @@ def parseSearchCmd(cmdlist):
     '''
     
     
-    if len(cmdlist) >= 3 and cmdlist[1] == "similarto":
-        return doSnippetSearch(similar=cmdlist[2])
+    if len(cmdlist) >= 3 and cmdlist[2] == "similarto":
+        return doSnippetSearch(similar=cmdlist[1])
     
     if len(cmdlist) >= 4 and cmdlist[2] == "lang":
         return doSnippetSearch(title=cmdlist[1],lang=cmdlist[3])
