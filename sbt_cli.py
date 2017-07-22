@@ -1,0 +1,914 @@
+#!/usr/bin/env python
+
+import urllib2
+import urllib
+import json
+import re
+import time
+import ssl
+
+import math
+import sys, readline, os,stat,requests
+import random
+import hashlib
+
+from datetime import datetime, timedelta
+
+
+
+BASEDIR="http://scratch.holly.home/sniptest/snippets_bentasker_co_uk/output" # No trailing slash
+AUTH=False
+ADDITIONAL_HEADERS=False
+DISKCACHE='/tmp/sbtcli.cache'
+CACHE_TTL=900 # 15 mins
+
+
+# I use this settings file to gain access to the non-public copy of my projects
+if os.path.isfile(os.path.expanduser("~/.sbtcli.settings")):
+    with open(os.path.expanduser("~/.sbtcli.settings"),'r') as f:
+        for x in f:
+            x = x.rstrip()
+            if not x:
+                continue
+            
+            # The lines are keyvalue pairs
+            cfgline = x.split("=")
+            if cfgline[0] == "BASEDIR":
+                BASEDIR=cfgline[1]
+
+            if cfgline[0] == "CACHE_TTL":
+                CACHE_TTL=int(cfgline[1])
+
+            if cfgline[0] == "DISKCACHE":
+                DISKCACHE=cfgline[1]
+                
+            if cfgline[0] == "ADD_HEADER":
+                if not ADDITIONAL_HEADERS:
+                    ADDITIONAL_HEADERS = []
+                    
+                h = {
+                        'name' : cfgline[1],
+                        'value' : '='.join(cfgline[2:]),
+                    }
+                ADDITIONAL_HEADERS.append(h)
+
+
+class MemCache(dict):
+    ''' A rudimentary in-memory cache with several storage areas and classes.
+    By default, the permstorage area will get flushed once an hour
+    
+    Filched and amended from my RequestRouter project
+    
+    '''
+    
+    def __init__(self):
+        self.storage = {}
+        self.lastpurge = int(time.time())
+        self.disabled = False
+        self.config = {}
+        self.config['doSelfPurge'] = False # Disabled as entries have their own TTL
+        self.config['defaultTTL'] = 900 # 15 mins
+        self.config['amOffline'] = False # Disable Offline mode by default
+        self.config['LRUTarget'] = 0.25 # Percentage reduction target for LRUs
+        
+        # Seed hashes to try and avoid deliberate hash collisions
+        self.seed = random.getrandbits(32)
+
+
+    def setItem(self,key,val,ttl=False):
+        ''' Store an item in a specific area
+        '''
+        
+        if self.disabled:
+            return  
+        
+        if not ttl:
+            # Use the default TTL
+            ttl = self.config['defaultTTL']
+        
+        keyh = self.genKeyHash(key)
+        now = int(time.time())
+        self.storage[keyh] = { "Value": val, "SetAt": now, "TTL" : ttl, "Origkey" : key, "Last-Use": now}
+
+
+    def getItem(self, key):
+        ''' Retrieve an item. Will check each storage area for an entry with the specified key
+        '''
+        
+        if self.disabled:
+            return  False        
+        
+        keyh = self.genKeyHash(key)
+        
+        if keyh not in self.storage:
+            return False
+        
+        # Check whether the ttl has expired
+        if (int(time.time()) - self.storage[keyh]["TTL"]) > self.storage[keyh]["SetAt"]:
+            # TTL has expired. Invalidate the object and return false
+            # only if we're not currently offline though.
+            if not self.config['amOffline']:
+                self.invalidate(key)
+                return False
+        
+        self.storage[keyh]["Last-Use"] = int(time.time())
+        return self.storage[keyh]["Value"]
+
+
+    def invalidate(self,key):
+        ''' Invalidate an item within the cache
+        '''
+        key = self.genKeyHash(key)
+        
+        if key not in self.storage:
+            return
+        
+        del self.storage[key]
+    
+    
+    def genKeyHash(self,key):
+        ''' Convert the supplied key into a hash
+        
+            We combine it with a seed to help make hash collision attempts harder on public facing infrastructure.
+            Probably overkill, but better to have it and not need it
+            
+        '''
+        return hashlib.sha256("%s%s" % (self.seed,key)).hexdigest()
+    
+    
+    def __getitem__(self,val):
+        ''' Magic method so that the temporary store can be accessed as if this class were a dict
+        '''
+        return self.getItem(val)
+    
+    def __setitem__(self,key,val):
+        ''' Magic method so that the temporary store can be accessed as if this class were a dict
+        '''
+        return self.setItem(key,val)
+    
+            
+    def flush(self):
+        ''' Flush the temporary storage area and response cache
+        
+        Restore anything that's been 'pre' cached
+        '''
+        del self.storage
+        self.storage = {}
+        
+        # Generate a new seed so it's harder to predict hashes
+        self.seed = random.getrandbits(32)
+        self.lastpurge = int(time.time())
+        
+        # Write the updated (and now empty) cache to disk so we don't end up reusing later
+        self.writeToDiskCache()
+
+        
+    def selfpurge(self):
+        ''' Sledgehammer for a nail. Periodically purge the permanent storage to make
+        sure we don't absorb too much memory
+        '''
+        
+        if 'doSelfPurge' in self.config and not self.config['doSelfPurge']:
+            return
+        
+        if (int(time.time()) - self.config['defaultTTL']) > self.lastpurge:
+            self.flush()
+
+
+    def LRU(self):
+        ''' Run a Least Recently Used flush on the cache storage
+        '''
+        
+        items = {}
+        
+        # Iterate over items in the cache, pulling out the cache key and when the item was last used
+        for keyh in self.storage:
+            items[keyh] = self.storage[keyh]['Last-Use']
+            
+        # Now we want to sort our dict from smallest timestamp (i.e. least recently used) to highest
+        ordered = sorted(items.items(), key=lambda x: x[1])
+
+        # That gives us a list of tuples (key,timestamp). We want to clear the first 25% (ish)
+        numitems = len(items)
+        toclear = math.ceil(numitems * self.config['LRUTarget'])
+        x = 0
+        
+        while x < toclear:
+            entry = ordered[x][0]
+            del self.storage[entry]           
+            x = x + 1
+
+        return x
+
+
+
+    def writeToDiskCache(self):
+        ''' Write a copy of the current cache out to disk
+        '''
+        
+        if "DiskCache" in self.config and self.config['DiskCache']:
+            p = {
+                    'storage' : self.storage,
+                    'lastpurge' : self.lastpurge,
+                    'seed' : self.seed
+                }
+            
+            cachejson = json.dumps(p)
+            f = open(self.config['DiskCache'],'w')
+            f.write(cachejson)
+            f.close()
+
+            
+    def loadFromDiskCache(self):
+        ''' Load previously cached values from disk (if present)
+        '''
+        
+        if "DiskCache" in self.config and self.config['DiskCache'] and os.path.isfile(self.config['DiskCache']):
+            f = open(self.config['DiskCache'],'r')
+            cache = json.load(f)
+            f.close()
+            self.storage = cache['storage']
+            self.lastpurge = cache['lastpurge']
+            self.seed = cache['seed']
+            
+
+
+    def setConfig(self,var,value):
+        ''' Set an internal config option
+        '''
+        self.config[var] = value
+
+
+
+
+
+def getJSON(url):
+    #print "Fetching %s" % (url,)
+    
+    # Check whether we have it in cache
+    resp = CACHE.getItem(url)
+    if resp:
+        return json.loads(resp)
+    
+    
+    if CACHE.config['amOffline']:
+        print "Item not in cache and we're offline"
+        return False
+    
+    request = urllib2.Request(url)
+    
+    if ADDITIONAL_HEADERS:
+        for header in ADDITIONAL_HEADERS:
+            request.add_header(header['name'],header['value'])
+    
+    response = urllib2.urlopen(request)
+    jsonstr = response.read()
+    #print jsonstr
+    
+    CACHE.setItem(url,jsonstr)
+    
+    return json.loads(jsonstr)
+
+
+
+def doTestRequest():
+    ''' Place a test request to work out whether we've got connectivity or not 
+    '''
+    url = "%s/sitemap.json" % (BASEDIR,)
+    
+    request = urllib2.Request(url)
+
+    
+    if ADDITIONAL_HEADERS:
+        for header in ADDITIONAL_HEADERS:
+            request.add_header(header['name'],header['value'])
+    
+    try:
+        response = urllib2.urlopen(request,timeout=5)
+        jsonstr = response.read()
+        
+        # Check we actually got json back
+        # Basically checking for captive portals. Though shouldn't be an issue given we're using HTTPS
+        # but also helps if there's an issue with the server
+
+        s = json.loads(jsonstr)
+        
+        # If we got it, update the cache
+        CACHE.setItem(url,jsonstr)
+        
+        return True
+    
+    except:
+        return False
+
+
+
+
+
+# See https://snippets.bentasker.co.uk/page-1705192300-Make-ASCII-Table-Python.html
+def make_table(columns, data):
+    """Create an ASCII table and return it as a string.
+
+    Pass a list of strings to use as columns in the table and a list of
+    dicts. The strings in 'columns' will be used as the keys to the dicts in
+    'data.'
+
+    """
+    # Calculate how wide each cell needs to be
+    cell_widths = {}
+    for c in columns:
+        lens = []
+        values = [lens.append(len(str(d.get(c, "")))) for d in data]
+        lens.append(len(c))
+        lens.sort()
+        cell_widths[c] = max(lens)
+
+    # Used for formatting rows of data
+    row_template = "|" + " {} |" * len(columns)
+
+    # CONSTRUCT THE TABLE
+
+    # The top row with the column titles
+    justified_column_heads = [c.ljust(cell_widths[c]) for c in columns]
+    header = row_template.format(*justified_column_heads)
+    # The second row contains separators
+    sep = "|" + "-" * (len(header) - 2) + "|"
+    end = "-" * len(header)
+    # Rows of data
+    rows = []
+
+    for d in data:
+        fields = [str(d.get(c, "")).ljust(cell_widths[c]) for c in columns]
+        row = row_template.format(*fields)
+        rows.append(row)
+    rows.append(end)
+    return "\n".join([header, sep] + rows)
+
+
+def stripTags(str):
+    ''' Strip out HTML tags and return just the plain text
+    '''
+    return re.sub('<[^<]+?>', '', str)
+
+
+def secondsToTime(s):
+    ''' Convert a count in seconds to hours and minutes
+    '''
+    
+    if not s:
+        return "0h 0m"
+    
+    mins, secs = divmod(int(s),60)
+    hours, mins = divmod(mins,60)
+    
+    return "%dh %02dm" % (hours,mins)
+
+
+def formatDate(s):
+    
+    s = int(s)
+    if s == 0:
+        return ''
+    
+    return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(s))
+
+
+
+def getAndSubmitComment(chgid):
+    ''' Read and Submit a comment
+    '''
+    
+    print "Commenter Name (default: %s)" % (DEFAULT_AUTHOR,)
+    name = raw_input()
+    
+    if len(name) < 2:
+        name = DEFAULT_AUTHOR
+        
+    print "Enter comment and press Ctrl-D when finished"
+    contents = []
+    while True:
+        try:
+            line = raw_input("")
+        except EOFError:
+            break
+        contents.append(line)    
+
+    submitComment(chgid,name,'\n'.join(contents))
+
+
+def submitComment(chgid,name,contents):
+    ''' Submit a comment into the System
+    '''
+    
+
+
+    method = "POST"
+    url = "%s/index.php?action=chgview&id=%s&format=json" % (BASEDIR,chgid)
+    data = urllib.urlencode({
+                'action' : 'comment',
+                'id' : chgid,
+                'author' : name,
+                'body' : contents
+                })
+
+
+    request = urllib2.Request(url)
+    
+    if AUTH:
+        request.add_header("Authorization","Basic %s" % (AUTH,))
+    
+    if ADDITIONAL_HEADERS:
+        for header in ADDITIONAL_HEADERS:
+            request.add_header(header['name'],header['value'])
+    
+
+
+    
+    ctx = getSSLContext()
+    content = urllib2.urlopen(request,data=data,context=ctx).read()
+    
+    # Flush the change from our cache
+    CACHE.invalidate(url)
+    
+    # Print the change
+    printChange(chgid)
+
+
+def printChange(cid):
+    ''' Print a ChangeControl entry
+    '''
+    
+    url = "%s/index.php?action=chgview&id=%s&format=json" % (BASEDIR,cid)
+    chg = getJSON(url)
+    
+    if not chg or not chg['Name']:
+        print "Change Not Found"
+        return
+    
+    prev = CACHE.getItem('Navi-now')
+    CACHE.setItem('Navi-last',prev)
+    CACHE.setItem('Navi-now',cid)
+
+    print "CCtrl %s: %s\n\n" % (chg['id'],chg['Name'])
+    
+    print "--------\nDetails\n--------"   
+    print "Status:    %s" % (chg['Status'],)
+    
+    print "Start:     %s    End: %s" % (formatDate(chg['ChangeWindow']['start']),formatDate(chg['ChangeWindow']['end']))
+
+
+    if chg['Status'] == "Completed":
+        print "\nCompleted: %s" % (formatDate(chg['ChangeWindow']['completed']),)
+    
+    
+    affected = []
+    
+    for aff in chg['affectedSystems']:
+        affected.append(aff['Name'])
+    
+    print "\nAffected Systems: %s" % (','.join(affected))
+
+
+    if len(chg['RelatedChangeNos']) > 0:
+        refs = []
+        
+        for aff in chg['RelatedChangeNos']:
+            refs.append(aff['Ref'])
+
+        print "Related References: %s" % (','.join(refs))
+
+
+    if len(chg['CustChangeNos']) > 0:
+        refs = []
+        
+        for aff in chg['CustChangeNos']:
+            refs.append(aff['Ref'])
+
+        print "Customer References: %s" % (','.join(refs))
+
+
+    print "\n-----------\nPersonnel\n-----------\n"
+    print "Approved  by: %s" % (chg['ApprovedBy'],)
+    print "Completed by: %s" % (chg['CompletedBy'],)           
+
+
+    print "\n-------------\nDescription\n-------------\n"
+    print "%s\n" % (stripTags(chg['description']))
+
+
+    if len(chg['comments']) > 0:
+        print "\n------------------"
+        print "Comments"
+        print "------------------\n"
+
+        for comment in chg['comments']:
+                print "----------------------------------------------------------------"
+                print "%s\n%s" % (comment['author'],formatDate(comment['Date']))
+                print "----------------------------------------------------------------"
+                print "%s\n\n" % (comment['body'],)
+
+
+
+def doUpcomingSearch():
+    ''' Do a date search to get any changes scheduled for the near future
+    '''
+    
+    print "Forthcoming Changes"
+    
+    
+    lastHourDateTime = datetime.now() - timedelta(hours = 6)
+    starttime=lastHourDateTime.strftime('%Y-%m-%d %H:%M:%S')
+    
+    endHourDateTime = datetime.now() + timedelta(hours = 48)
+    endtime=endHourDateTime.strftime('%Y-%m-%d %H:%M:%S')
+    
+    url = "%s/index.php?action=chgsearch&format=json&t=d&s=%s&e=%s" % (BASEDIR, urllib.quote_plus(starttime), urllib.quote_plus(endtime))
+    plist = getJSON(url)
+    
+    
+    if not plist or plist['Status'] != "ResultsFound":
+        print "No Results"
+        return
+    
+    print buildIssueTable(plist['results'])    
+    
+    
+def doEmptySearch():
+    ''' Grab a copy of the sitemap and print the entries in a table
+    '''
+    url = "%s/index.php?action=sitemap&format=json" % (BASEDIR, )
+    plist = getJSON(url)
+
+
+    if not plist or plist['Status'] != "ResultsFound":
+        print "No Results"
+        return
+    
+    print buildIssueTable(plist['results'])
+    
+    
+
+def doBasicSearch(term):
+    ''' Run a basic search for the provided term in title
+    '''
+    
+    print "Search results for '%s'\n" % (term,)
+
+
+    url = "%s/index.php?action=chgsearch&format=json&q=%s" % (BASEDIR, urllib.quote_plus(term))
+    plist = getJSON(url)
+    
+    
+    if not plist or plist['Status'] != "ResultsFound":
+        print "No Results"
+        return
+    
+    print buildIssueTable(plist['results'])
+    
+
+
+
+def doHostnameSearch(term):
+    ''' Run a basic search for the provided term in hostnames
+    '''
+    
+    print "Search results for '%s' (Hostnames only)\n" % (term,)
+
+
+    url = "%s/index.php?action=chgsearch&format=json&t=h&q=%s" % (BASEDIR, urllib.quote_plus(term))
+    plist = getJSON(url)
+    
+    
+    if not plist or plist['Status'] != "ResultsFound":
+        print "No Results"
+        return
+    
+    print buildIssueTable(plist['results'])
+    
+
+    
+def doChangeRefSearch(term):
+    ''' Run a basic search for the provided term in changerefs
+    '''
+    
+    print "Search results for '%s' (Changerefs only)\n" % (term,)
+
+
+    url = "%s/index.php?action=chgsearch&format=json&t=c&q=%s" % (BASEDIR, urllib.quote_plus(term))
+    plist = getJSON(url)
+    
+    
+    if not plist or plist['Status'] != "ResultsFound":
+        print "No Results"
+        return
+    
+    print buildIssueTable(plist['results'])    
+    
+
+    
+def buildIssueTable(issues):
+    ''' Print a list of changes in tabular form
+    '''
+    
+    Cols = ['Change ID','Title','Host(s)','Status','Start Date']
+    Rows = []
+    
+    for chg in issues:
+        p = {
+                'Change ID' : chg['id'],
+                'Title': chg['Name'],
+                'Host(s)': '',
+                'Status' : chg['Status'],
+                'Start Date' : formatDate(chg['ChangeWindow']['start'])
+            
+            }
+        
+        hosts = []
+        
+        for aff in chg['affectedSystems']:
+            hosts.append(aff['Name'])
+        
+        p['Host(s)'] = ','.join(hosts)
+        Rows.append(p)
+        
+    return make_table(Cols,Rows)
+        
+
+
+# CLI related functions begin
+def runInteractive(display_prompt,echo_cmd=False):
+    
+        # Trigger the periodic auto flushes
+        CACHE.selfpurge()
+        
+	try:
+	    readline.read_history_file(os.path.expanduser("~/.sbtcli.history"))
+	except: 
+	    pass # Ignore FileNotFoundError, history file doesn't exist
+
+	while True:
+	    try:
+		command = raw_input(display_prompt)
+
+	    except EOFError:
+		print("")
+		break
+
+	    if command == "q":
+		break
+
+	    elif command.startswith("#") or command == "" or command == " ":
+		continue
+
+	    if echo_cmd:
+		print "> " + command
+
+	    readline.write_history_file(os.path.expanduser("~/.sbtcli.history"))
+	    processCommand(command)
+
+
+def processCommand(cmd):
+    ''' Process the command syntax to work out which functions need to be called
+    '''
+    
+    if re.match('[0-9]+',cmd):
+        return printChange(cmd)
+        
+
+    # We now need to build the command, but take into account that strings may be wrapped in quotes
+    # these shoudld be treated as a single argument 
+
+    # Split the command out to a list
+    origcmdlist = cmd.split(' ')
+    cmdlist = []
+    NEEDQUOTE=False
+    ENDSWITHQUOTE=False
+    txtbuffer=''
+    
+    for entry in origcmdlist:
+        if entry[0] == '"' or entry[0] == "'":
+            # Starts with a quote.
+            NEEDQUOTE=True
+        
+        if entry[-1] == '"' or entry[-1] == "'":
+            ENDSWITHQUOTE=True
+        
+        if NEEDQUOTE and not ENDSWITHQUOTE:
+            # Need a quote, just append it to the buffer for now
+            txtbuffer += entry.replace("'","").replace('"',"")
+            
+            # Reinstate the original space
+            txtbuffer += " "
+    
+        # Does it end with a quote?
+        if ENDSWITHQUOTE:
+            # It does. Append to the buffer (known bug here!)
+            txtbuffer += entry.replace("'","").replace('"',"")
+            NEEDQUOTE=False
+            entry = txtbuffer
+            txtbuffer = ''
+            
+        if not NEEDQUOTE:
+            # Append the command segment
+            cmdlist.append(entry.rstrip())
+
+
+    if cmdlist[0] == 'p' or cmdlist[0] == 'back':
+        # Navigation command to go back to the last issue viewed
+        lastview = CACHE.getItem('Navi-last')
+        if not lastview:
+            print "You don't seem to have viewed a change previously"
+            return
+        return printChange(lastview)
+
+
+    if cmdlist[0] in ["upcoming","now","soon"]:
+        return doUpcomingSearch()
+
+
+    if cmdlist[0] == "cache":
+        return parseCacheOptions(cmdlist)
+
+    if cmdlist[0] == "comment":
+        chgid = CACHE.getItem('Navi-now')
+        if not chgid:
+            print "You must view a change first"
+            return
+        return getAndSubmitComment(chgid)
+
+
+    if cmdlist[0] == "issue":
+        return printChange(cmdlist[1])
+    
+    if cmdlist[0] == "list":
+        return doEmptySearch()
+    
+    if cmdlist[0] == "set":
+        return parseSetCmd(cmdlist)
+    
+    if cmdlist[0] == "search":
+        return parseSearchCmd(cmdlist)    
+    
+
+
+def parseSearchCmd(cmdlist):
+    ''' Handle search commands
+    '''
+    
+    print len(cmdlist)
+    if len(cmdlist) >2:
+        if cmdlist[2] == "host" or cmdlist[2] == "hostname":
+            return doHostnameSearch(cmdlist[1])
+    
+        if cmdlist[2] == "change" or cmdlist[2] == "changeref":
+                return doChangeRefSearch(cmdlist[1])
+        
+    return doBasicSearch(cmdlist[1])
+
+
+
+def parseSetCmd(cmdlist):
+    ''' Used to set various internals
+    '''
+
+
+    if cmdlist[1] == "defaultttl":
+        CACHE.config['defaultTTL'] = int(cmdlist[2])
+        print "Default TTL set to %s" % (cmdlist[2])
+
+    if cmdlist[1] == "lrutarget":
+        CACHE.config['LRUTarget'] = cmdlist[2]
+        print "LRU Target set to %s%" % (cmdlist[2])
+        
+    if cmdlist[1] == "Offline":
+        CACHE.config['amOffline'] = True
+        print "Offline mode enabled"
+        
+    if cmdlist[1] == "Online":
+        CACHE.config['amOffline'] = False
+        print "Offline mode disabled"
+        
+
+def parseCacheOptions(cmdlist):
+    ''' Utility functions to aid troubleshooting if the cache causes any headaches
+    '''
+    
+    if cmdlist[1] == "dump":
+        # Dump the contents of the cache
+        Cols = ['Key','Expires','Value']
+        Rows = []
+        
+        for entry in CACHE.storage:
+            p = {
+                'Key' : CACHE.storage[entry]['Origkey'],
+                'Expires' : time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(CACHE.storage[entry]['SetAt'] + CACHE.storage[entry]['TTL'])),
+                'Value' : CACHE.storage[entry]['Value'],
+                }
+            Rows.append(p)
+        print make_table(Cols,Rows)
+
+
+    if cmdlist[1] == "fetch":
+        if re.match('[A-Z]+-[0-9]+',cmdlist[2]):
+            url = "%s/browse/%s.json" % (BASEDIR,cmdlist[2])
+            getJSON(url)
+            print "Written to cache"
+            return
+            
+        # Fetch the specified URL 
+        getJSON(cmdlist[2])
+        print "Written to cache"
+        return
+
+    if cmdlist[1] == "LRU":
+        count = CACHE.LRU()
+        print "LRU Triggered. %s items removed" % (count,)
+
+
+    if cmdlist[1] == "flush":
+        # Flush the cache
+        CACHE.flush()
+        print "Cache flushed"
+
+    if cmdlist[1] == "get":
+        f = CACHE.getItem(cmdlist[2])
+        if not f:
+            print "Not in Cache"
+            return
+        
+        print f
+
+
+    if cmdlist[1] == "invalidate":
+        CACHE.invalidate(cmdlist[2])
+        print "Invalidated"
+
+
+        
+    if cmdlist[1] == "print":
+        # Print a list of keys and when they expire
+        Cols = ['Key','Expires']
+        Rows = []
+        
+        for entry in CACHE.storage:
+            p = {
+                'Key' : CACHE.storage[entry]['Origkey'],
+                'Expires' : time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(CACHE.storage[entry]['SetAt'] + CACHE.storage[entry]['TTL']))
+                }
+            Rows.append(p)
+        print make_table(Cols,Rows)
+
+
+    
+    
+
+CACHE = MemCache()
+if DISKCACHE:
+    CACHE.setConfig('DiskCache',DISKCACHE)
+    CACHE.loadFromDiskCache()
+
+if CACHE_TTL:
+    CACHE.setConfig('defaultTTL',CACHE_TTL)
+
+
+if not doTestRequest():
+    print "Enabling Offline mode"
+    CACHE.setConfig('amOffline',True)
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+            # Launch interactive mode
+            
+            # If commands are being redirected/piped, we don't want to display the prompt after each
+            mode = os.fstat(sys.stdin.fileno()).st_mode
+            if stat.S_ISFIFO(mode) or stat.S_ISREG(mode):
+                    display_prompt = ""
+                    echo_cmd = True
+            else:
+                    display_prompt = "cbtcli> "
+                    echo_cmd = False
+
+            runInteractive(display_prompt,echo_cmd)
+
+            # Save the most recent view history
+            lastview = CACHE.getItem('Navi-now')
+            CACHE.setItem('Navi-last',lastview, ttl=99999999)
+            CACHE.writeToDiskCache()
+            sys.exit()
+
+
+    # Otherwise, pull the command from the commandline arguments
+
+    # Process them first to handle quoted strings
+    for i,val in enumerate(sys.argv):
+        if " " in val:
+            sys.argv[i] = "'%s'" % (val,)
+        
+        
+    command=" ".join(sys.argv[1:])
+    processCommand(command)
+    CACHE.writeToDiskCache()
+
+
+
+
