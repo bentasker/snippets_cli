@@ -386,7 +386,7 @@ def printSnippet(sid):
         print "NOT FOUND"
         return False
     
-    url = "%s/%s" % (BASEDIR,urlpath)
+    url = "%s%s" % (BASEDIR,urlpath)
     snip = getJSON(url)
     
     if not snip or not snip['name']:
