@@ -244,7 +244,6 @@ class MemCache(dict):
 
 
 
-
 def getJSON(url,ttl=False):
     #print "Fetching %s" % (url,)
     
@@ -306,8 +305,6 @@ def doTestRequest():
 
 
 
-
-
 # See https://snippets.bentasker.co.uk/page-1705192300-Make-ASCII-Table-Python.html
 def make_table(columns, data):
     """Create an ASCII table and return it as a string.
@@ -352,28 +349,6 @@ def stripTags(str):
     ''' Strip out HTML tags and return just the plain text
     '''
     return re.sub('<[^<]+?>', '', str)
-
-
-def secondsToTime(s):
-    ''' Convert a count in seconds to hours and minutes
-    '''
-    
-    if not s:
-        return "0h 0m"
-    
-    mins, secs = divmod(int(s),60)
-    hours, mins = divmod(mins,60)
-    
-    return "%dh %02dm" % (hours,mins)
-
-
-def formatDate(s):
-    
-    s = int(s)
-    if s == 0:
-        return ''
-    
-    return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(s))
 
 
 def printSnippet(sid):
@@ -434,9 +409,9 @@ def printSnippet(sid):
 
 
 
-
-
 def getSnippetUrlFromId(sid):
+    ''' Take a snippet ID and find out what the url path is
+    '''
     
     dictkey = 'snip-%s' % (sid,)
     if dictkey not in SNIPPET_URLS:
