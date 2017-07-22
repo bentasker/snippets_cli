@@ -427,6 +427,7 @@ def getSnippetUrlFromId(sid):
     return SNIPPET_URLS[dictkey]
     
 
+
 def buildSnippetIDMappings(snippets):
     ''' Populate a dict mapping URLs to IDs
     '''
@@ -436,6 +437,7 @@ def buildSnippetIDMappings(snippets):
         if dictkey not in SNIPPET_URLS:
             SNIPPET_URLS[dictkey] = sn['href']
             
+    CACHE.setItem('id-mappings',SNIPPET_URLS, ttl=99999999)
     
     
     
@@ -772,6 +774,12 @@ if CACHE_TTL:
 if not doTestRequest():
     print "Enabling Offline mode"
     CACHE.setConfig('amOffline',True)
+
+
+cachedmappings = CACHE.getItem('id-mappings')
+if cachedmappings:
+    SNIPPET_URLS = cachedmappings
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
