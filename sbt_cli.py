@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 
 
 
-BASEDIR="http://scratch.holly.home/sniptest/snippets_bentasker_co_uk/output" # No trailing slash
+BASEDIR="https://snippets.bentasker.co.uk" # No trailing slash
 AUTH=False
 ADDITIONAL_HEADERS=False
 DISKCACHE='/tmp/sbtcli.cache'
