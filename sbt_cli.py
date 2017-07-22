@@ -376,24 +376,79 @@ def formatDate(s):
     return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(s))
 
 
-def printSnippet(cid):
+def printSnippet(sid):
     ''' Print a Snippet
     '''
     
-    # TODO change this to work with snippets
-    url = "%s/index.php?action=chgview&id=%s&format=json" % (BASEDIR,cid)
-    chg = getJSON(url)
+    urlpath = getSnippetUrlFromId(sid)
     
-    if not chg or not chg['Name']:
-        print "Change Not Found"
+    if not urlpath:
+        print "NOT FOUND"
+        return False
+    
+    url = "%s/%s" % (BASEDIR,urlpath)
+    snip = getJSON(url)
+    
+    if not snip or not snip['name']:
+        print "Snippet Not Found"
         return
     
     prev = CACHE.getItem('Navi-now')
     CACHE.setItem('Navi-last',prev)
-    CACHE.setItem('Navi-now',cid)
+    CACHE.setItem('Navi-now',sid)
 
-    print "NOT IMPLEMENTED"
+    print "%s: %s (%s)\n" % (sid,snip['name'],snip['lang'])
+    
+    print "-------------\nDetails\n-------------\n"
+    
+    print "Language: %s" % (snip['lang'],)
+    
+    if "license" in snip and len(snip['license']) > 0:
+            print "License: %s" % (snip['license'],)
+    
+    
+    print "\n-------------\nDescription\n-------------\n\n%s\n" % (snip['description'])
 
+
+    if "requires" in snip and len(snip['requires']) > 0:
+            print "-------------\nRequires\n-------------\n%s\n" % (snip['requires'],)
+    
+
+
+    if "basedon" in snip and len(snip['basedon']) > 0:
+            print "Based On\n-------------\n\n%s\n" % (snip['basedon'],)
+    
+
+    if "similar" in snip and len(snip['similar']) > 0:
+            print "Similar To\n-------------\n\n%s\n" % (snip['similar'],)
+
+
+    print "\n-------------\nSnippet\n-------------\n\n%s" % (snip['snippet'])
+    
+    if "usage" in snip and len(snip['usage']) > 0:
+            print "-------------\nUsage Example\n-------------\n\n%s" % (snip['usage'],)
+    
+    print ''
+
+
+
+
+
+def getSnippetUrlFromId(sid):
+    
+    dictkey = 'snip-%s' % (sid,)
+    if dictkey not in SNIPPET_URLS:
+        url = "%s/sitemap.json" % (BASEDIR, )
+        plist = getJSON(url)
+        buildSnippetIDMappings(plist['entries'])
+
+    if dictkey not in SNIPPET_URLS:
+        # Obviously an invalid snippet
+        return False
+    
+    # Otherwise return the stored path
+    return SNIPPET_URLS[dictkey]
+    
 
 def buildSnippetIDMappings(snippets):
     ''' Populate a dict mapping URLs to IDs
