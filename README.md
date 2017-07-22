@@ -67,7 +67,8 @@ The upstream JSON files define whether there's a 'next' or 'previous' issue, whe
 
 ### Search
 
-    search [search phrase] - Search globally for any snippet with the phrase in title
+    search [search phrase] - Search globally for any snippet with the phrase in title, keywords or similar to
+    search [search phrase] title - Search globally for any snippet with the phrase in title
     search [search phrase] lang [language] - Filter search results to only include specified language
     search similarto [string] - Search for snippets that contain [string] in the list of things they're similar to
     lang [language] - Output all snippets marked as being written for [language]
