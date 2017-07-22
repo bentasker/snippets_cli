@@ -481,6 +481,35 @@ def printSnippetList():
     print buildIssueTable(plist['entries'])
     
 
+
+def doSnippetSearch(title=False):
+    ''' Run a search against the sitemap
+    '''
+    
+    url = "%s/sitemap.json" % (BASEDIR, )
+    plist = getJSON(url)
+
+
+    if not plist:
+        print "No Results"
+        return
+
+    buildSnippetIDMappings(plist['entries'])    
+
+    # Iterate over the entries checking for the search string
+    matches = []
+    
+    for snip in plist['entries']:
+        if title and title.lower() in snip['name'].lower():
+            matches.append(snip)
+            continue
+
+
+    print "Search results - title: %s" % (title,)
+        
+    print buildIssueTable(matches)
+
+
     
 def buildIssueTable(issues):
     ''' Print a list of changes in tabular form
@@ -607,8 +636,8 @@ def parseSearchCmd(cmdlist):
     ''' Handle search commands
     '''
     
-    print "NOTIMPLEMENTED"
-    return False
+    return doSnippetSearch(title=cmdlist[1])
+
 
 
 
