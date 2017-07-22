@@ -500,11 +500,16 @@ def doSnippetSearch(title=False,lang=False):
     matches = []
     
     for snip in plist['entries']:
+        # Title search
         if title and title.lower() in snip['name'].lower():
             if not lang or lang.lower() == snip['primarylanguage'].lower():
                 matches.append(snip)
                 continue
-
+            
+        # Language only search
+        if lang and lang.lower() == snip['primarylanguage'].lower():
+            matches.append(snip)
+            continue
 
     print "Search results - title: %s, lang %s" % (title,lang)
         
@@ -626,6 +631,11 @@ def processCommand(cmd):
     if cmdlist[0] == "list":
         # TODO - change this to be snippets related
         return printSnippetList()
+    
+    if cmdlist[0] == "lang":
+        # TODO - change this to be snippets related
+        return doSnippetSearch(lang=cmdlist[1])
+    
     
     if cmdlist[0] == "set":
         return parseSetCmd(cmdlist)

@@ -69,7 +69,7 @@ The upstream JSON files define whether there's a 'next' or 'previous' issue, whe
 
     search [search phrase] - Search globally for any snippet with the phrase in title
     search [search phrase] lang [language] - Filter search results to only include specified language
-
+    lang [language] - Output all snippets marked as being written for [language]
     
     
 ### Cache Interaction
