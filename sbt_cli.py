@@ -394,18 +394,18 @@ def printSnippet(cid):
 
     
     
-def doEmptySearch():
+def printSnippetList():
     ''' Grab a copy of the sitemap and print the entries in a table
     '''
-    url = "%s/index.php?action=sitemap&format=json" % (BASEDIR, )
+    url = "%s/sitemap.json" % (BASEDIR, )
     plist = getJSON(url)
 
 
-    if not plist or plist['Status'] != "ResultsFound":
+    if not plist:
         print "No Results"
         return
     
-    print buildIssueTable(plist['results'])
+    print buildIssueTable(plist['entries'])
     
 
     
@@ -413,25 +413,15 @@ def buildIssueTable(issues):
     ''' Print a list of changes in tabular form
     '''
     
-    Cols = ['Change ID','Title','Host(s)','Status','Start Date']
+    Cols = ['Snippet ID','Title','Language']
     Rows = []
     
     for chg in issues:
         p = {
-                'Change ID' : chg['id'],
-                'Title': chg['Name'],
-                'Host(s)': '',
-                'Status' : chg['Status'],
-                'Start Date' : formatDate(chg['ChangeWindow']['start'])
-            
+                'Snippet ID' : chg['id'],
+                'Title': chg['name'],
+                'Language' : chg['primarylanguage']
             }
-        
-        hosts = []
-        
-        for aff in chg['affectedSystems']:
-            hosts.append(aff['Name'])
-        
-        p['Host(s)'] = ','.join(hosts)
         Rows.append(p)
         
     return make_table(Cols,Rows)
@@ -530,7 +520,7 @@ def processCommand(cmd):
     
     if cmdlist[0] == "list":
         # TODO - change this to be snippets related
-        return doEmptySearch()
+        return printSnippetList()
     
     if cmdlist[0] == "set":
         return parseSetCmd(cmdlist)
