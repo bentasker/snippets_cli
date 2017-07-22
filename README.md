@@ -34,17 +34,16 @@ There's also an offline mode, which is initially toggled based upon a test reque
 
 ## Usage
 
-*TO BE UPDATED*
 
 Commands can be parsed in one of three ways
 
-* Piped (e.g. `echo 4 | ./cbt_cli.py`)
-* Interactivey (`./cbt_cli.py`)
-* As arguments (`./cbt_cli.py 4`)
+* Piped (e.g. `echo 4 | ./sbt_cli.py`)
+* Interactivey (`./sbt_cli.py`)
+* As arguments (`./sbt_cli.py 4`)
 
 Where something intended as single argument contains a space, it should be quoted:
 
-    ./cbt_cli.py search 'Experimental Upgrade'
+    ./sbt_cli.py search 'RTMP Server'
 
 
 ### Navigation
@@ -56,23 +55,21 @@ The upstream JSON files define whether there's a 'next' or 'previous' issue, whe
 
 ### General
 
-    [Num] - Jump to the specified CCtrl ID (e.g. 4)
-    now - Show any changes scheduled between 6 hours ago and 48 hours in the future (essentially a list of ongoing or planned changes)
-    list - List all changes in the system
+    [Num] - Jump to the specified Snippet ID (e.g. 4)
+    list - List all snippets in the system
 
 
-### Issue View
+### Snippet View
 
-    [Num] - Display the named change
-    issue [Num] - Display the named change
-    comment - After viewing an issue, typing comment will allow a comment to be added
+    [Snippet ID] - Display the specified snippet
+    snippet [Num] - Display the specified snippet
 
 
 ### Search
 
-    search [search phrase] - Search globally for any change with the phrase in title, description or change references
-    search [search phrase] change - Search for any issues with [search phrase] in Change References (exact phrase only)
-    search [search phrase] host - Search for any issues with [search phrase] in affected hostnames
+    search [search phrase] - Search globally for any snippet with the phrase in title
+    search [search phrase] lang [language] - Filter search results to only include specified language
+
     
     
 ### Cache Interaction
