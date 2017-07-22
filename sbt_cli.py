@@ -482,7 +482,7 @@ def printSnippetList():
     
 
 
-def doSnippetSearch(title=False,lang=False):
+def doSnippetSearch(title=False,lang=False,similar=False):
     ''' Run a search against the sitemap
     '''
     
@@ -499,19 +499,29 @@ def doSnippetSearch(title=False,lang=False):
     # Iterate over the entries checking for the search string
     matches = []
     
+    if lang:
+        lang = lang.lower()
+    
     for snip in plist['entries']:
         # Title search
         if title and title.lower() in snip['name'].lower():
-            if not lang or lang.lower() == snip['primarylanguage'].lower():
+            if not lang or lang == snip['primarylanguage'].lower():
                 matches.append(snip)
                 continue
+
+        # Search for phrases in "similar"
+        if similar and similar.lower() in snip['similar'].lower():
+            if not lang or lang == snip['primarylanguage'].lower():
+                matches.append(snip)
+                continue
+                
             
         # Language only search
-        if lang and lang.lower() == snip['primarylanguage'].lower():
+        if lang and lang == snip['primarylanguage'].lower():
             matches.append(snip)
             continue
 
-    print "Search results - title: %s, lang %s" % (title,lang)
+    print "Search results - title: %s, lang %s, similarto %s" % (title,lang,similar)
         
     print buildIssueTable(matches)
 
@@ -649,6 +659,9 @@ def parseSearchCmd(cmdlist):
     ''' Handle search commands
     '''
     
+    
+    if len(cmdlist) >= 3 and cmdlist[1] == "similarto":
+        return doSnippetSearch(similar=cmdlist[2])
     
     if len(cmdlist) >= 4 and cmdlist[2] == "lang":
         return doSnippetSearch(title=cmdlist[1],lang=cmdlist[3])
