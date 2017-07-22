@@ -373,71 +373,11 @@ def formatDate(s):
     return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(s))
 
 
-
-def getAndSubmitComment(chgid):
-    ''' Read and Submit a comment
+def printSnippet(cid):
+    ''' Print a Snippet
     '''
     
-    print "Commenter Name (default: %s)" % (DEFAULT_AUTHOR,)
-    name = raw_input()
-    
-    if len(name) < 2:
-        name = DEFAULT_AUTHOR
-        
-    print "Enter comment and press Ctrl-D when finished"
-    contents = []
-    while True:
-        try:
-            line = raw_input("")
-        except EOFError:
-            break
-        contents.append(line)    
-
-    submitComment(chgid,name,'\n'.join(contents))
-
-
-def submitComment(chgid,name,contents):
-    ''' Submit a comment into the System
-    '''
-    
-
-
-    method = "POST"
-    url = "%s/index.php?action=chgview&id=%s&format=json" % (BASEDIR,chgid)
-    data = urllib.urlencode({
-                'action' : 'comment',
-                'id' : chgid,
-                'author' : name,
-                'body' : contents
-                })
-
-
-    request = urllib2.Request(url)
-    
-    if AUTH:
-        request.add_header("Authorization","Basic %s" % (AUTH,))
-    
-    if ADDITIONAL_HEADERS:
-        for header in ADDITIONAL_HEADERS:
-            request.add_header(header['name'],header['value'])
-    
-
-
-    
-    ctx = getSSLContext()
-    content = urllib2.urlopen(request,data=data,context=ctx).read()
-    
-    # Flush the change from our cache
-    CACHE.invalidate(url)
-    
-    # Print the change
-    printChange(chgid)
-
-
-def printChange(cid):
-    ''' Print a ChangeControl entry
-    '''
-    
+    # TODO change this to work with snippets
     url = "%s/index.php?action=chgview&id=%s&format=json" % (BASEDIR,cid)
     chg = getJSON(url)
     
@@ -449,88 +389,9 @@ def printChange(cid):
     CACHE.setItem('Navi-last',prev)
     CACHE.setItem('Navi-now',cid)
 
-    print "CCtrl %s: %s\n\n" % (chg['id'],chg['Name'])
-    
-    print "--------\nDetails\n--------"   
-    print "Status:    %s" % (chg['Status'],)
-    
-    print "Start:     %s    End: %s" % (formatDate(chg['ChangeWindow']['start']),formatDate(chg['ChangeWindow']['end']))
+    print "NOT IMPLEMENTED"
 
 
-    if chg['Status'] == "Completed":
-        print "\nCompleted: %s" % (formatDate(chg['ChangeWindow']['completed']),)
-    
-    
-    affected = []
-    
-    for aff in chg['affectedSystems']:
-        affected.append(aff['Name'])
-    
-    print "\nAffected Systems: %s" % (','.join(affected))
-
-
-    if len(chg['RelatedChangeNos']) > 0:
-        refs = []
-        
-        for aff in chg['RelatedChangeNos']:
-            refs.append(aff['Ref'])
-
-        print "Related References: %s" % (','.join(refs))
-
-
-    if len(chg['CustChangeNos']) > 0:
-        refs = []
-        
-        for aff in chg['CustChangeNos']:
-            refs.append(aff['Ref'])
-
-        print "Customer References: %s" % (','.join(refs))
-
-
-    print "\n-----------\nPersonnel\n-----------\n"
-    print "Approved  by: %s" % (chg['ApprovedBy'],)
-    print "Completed by: %s" % (chg['CompletedBy'],)           
-
-
-    print "\n-------------\nDescription\n-------------\n"
-    print "%s\n" % (stripTags(chg['description']))
-
-
-    if len(chg['comments']) > 0:
-        print "\n------------------"
-        print "Comments"
-        print "------------------\n"
-
-        for comment in chg['comments']:
-                print "----------------------------------------------------------------"
-                print "%s\n%s" % (comment['author'],formatDate(comment['Date']))
-                print "----------------------------------------------------------------"
-                print "%s\n\n" % (comment['body'],)
-
-
-
-def doUpcomingSearch():
-    ''' Do a date search to get any changes scheduled for the near future
-    '''
-    
-    print "Forthcoming Changes"
-    
-    
-    lastHourDateTime = datetime.now() - timedelta(hours = 6)
-    starttime=lastHourDateTime.strftime('%Y-%m-%d %H:%M:%S')
-    
-    endHourDateTime = datetime.now() + timedelta(hours = 48)
-    endtime=endHourDateTime.strftime('%Y-%m-%d %H:%M:%S')
-    
-    url = "%s/index.php?action=chgsearch&format=json&t=d&s=%s&e=%s" % (BASEDIR, urllib.quote_plus(starttime), urllib.quote_plus(endtime))
-    plist = getJSON(url)
-    
-    
-    if not plist or plist['Status'] != "ResultsFound":
-        print "No Results"
-        return
-    
-    print buildIssueTable(plist['results'])    
     
     
 def doEmptySearch():
@@ -545,64 +406,6 @@ def doEmptySearch():
         return
     
     print buildIssueTable(plist['results'])
-    
-    
-
-def doBasicSearch(term):
-    ''' Run a basic search for the provided term in title
-    '''
-    
-    print "Search results for '%s'\n" % (term,)
-
-
-    url = "%s/index.php?action=chgsearch&format=json&q=%s" % (BASEDIR, urllib.quote_plus(term))
-    plist = getJSON(url)
-    
-    
-    if not plist or plist['Status'] != "ResultsFound":
-        print "No Results"
-        return
-    
-    print buildIssueTable(plist['results'])
-    
-
-
-
-def doHostnameSearch(term):
-    ''' Run a basic search for the provided term in hostnames
-    '''
-    
-    print "Search results for '%s' (Hostnames only)\n" % (term,)
-
-
-    url = "%s/index.php?action=chgsearch&format=json&t=h&q=%s" % (BASEDIR, urllib.quote_plus(term))
-    plist = getJSON(url)
-    
-    
-    if not plist or plist['Status'] != "ResultsFound":
-        print "No Results"
-        return
-    
-    print buildIssueTable(plist['results'])
-    
-
-    
-def doChangeRefSearch(term):
-    ''' Run a basic search for the provided term in changerefs
-    '''
-    
-    print "Search results for '%s' (Changerefs only)\n" % (term,)
-
-
-    url = "%s/index.php?action=chgsearch&format=json&t=c&q=%s" % (BASEDIR, urllib.quote_plus(term))
-    plist = getJSON(url)
-    
-    
-    if not plist or plist['Status'] != "ResultsFound":
-        print "No Results"
-        return
-    
-    print buildIssueTable(plist['results'])    
     
 
     
@@ -672,7 +475,7 @@ def processCommand(cmd):
     '''
     
     if re.match('[0-9]+',cmd):
-        return printChange(cmd)
+        return printSnippet(cmd)
         
 
     # We now need to build the command, but take into account that strings may be wrapped in quotes
@@ -717,30 +520,16 @@ def processCommand(cmd):
         # Navigation command to go back to the last issue viewed
         lastview = CACHE.getItem('Navi-last')
         if not lastview:
-            print "You don't seem to have viewed a change previously"
+            print "You don't seem to have viewed a snippet previously"
             return
-        return printChange(lastview)
-
-
-    if cmdlist[0] in ["upcoming","now","soon"]:
-        return doUpcomingSearch()
+        return printSnippet(lastview)
 
 
     if cmdlist[0] == "cache":
         return parseCacheOptions(cmdlist)
-
-    if cmdlist[0] == "comment":
-        chgid = CACHE.getItem('Navi-now')
-        if not chgid:
-            print "You must view a change first"
-            return
-        return getAndSubmitComment(chgid)
-
-
-    if cmdlist[0] == "issue":
-        return printChange(cmdlist[1])
     
     if cmdlist[0] == "list":
+        # TODO - change this to be snippets related
         return doEmptySearch()
     
     if cmdlist[0] == "set":
@@ -755,15 +544,8 @@ def parseSearchCmd(cmdlist):
     ''' Handle search commands
     '''
     
-    print len(cmdlist)
-    if len(cmdlist) >2:
-        if cmdlist[2] == "host" or cmdlist[2] == "hostname":
-            return doHostnameSearch(cmdlist[1])
-    
-        if cmdlist[2] == "change" or cmdlist[2] == "changeref":
-                return doChangeRefSearch(cmdlist[1])
-        
-    return doBasicSearch(cmdlist[1])
+    print "NOTIMPLEMENTED"
+    return False
 
 
 
