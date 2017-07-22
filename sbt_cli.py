@@ -617,6 +617,8 @@ def processCommand(cmd):
             return
         return printSnippet(lastview)
 
+    if cmdlist[0] == "snippet":
+        return printSnippet(cmdlist[1])
 
     if cmdlist[0] == "cache":
         return parseCacheOptions(cmdlist)
