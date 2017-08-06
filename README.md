@@ -69,6 +69,9 @@ The upstream JSON files define whether there's a 'next' or 'previous' issue, whe
 
 ### Search
 
+If only a single snippet matches the given search, it will be printed directly
+
+
     search [search phrase] - Search globally for any snippet with the phrase in title, keywords or similar to
     search [search phrase] title - Search globally for any snippet with the phrase in title
     search [search phrase] lang [language] - Filter search results to only include specified language

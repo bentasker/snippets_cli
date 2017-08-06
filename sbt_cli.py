@@ -513,6 +513,9 @@ def doSnippetSearch(title=False,lang=False,similar=False,searchstring=False):
             matches.append(snip)
             continue
 
+    if len(matches) == 1:
+        return printSnippet(matches[0]['id'])
+
     print "Search results - String: %s, title: %s, lang: %s, similarto: %s" % (searchstring,title,lang,similar)
         
     print buildIssueTable(matches)
