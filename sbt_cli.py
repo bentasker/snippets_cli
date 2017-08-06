@@ -405,6 +405,10 @@ def printSnippet(sid):
     if "usage" in snip and len(snip['usage']) > 0:
             print "-------------\nUsage Example\n-------------\n\n%s" % (snip['usage'],)
     
+    
+    print "HTML Link\n----------"
+    print "%s%s" % (BASEDIR,urlpath.replace("/json","").replace(".json",".html"))
+    
     print ''
 
 
