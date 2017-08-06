@@ -644,7 +644,10 @@ def processCommand(cmd):
     
     if cmdlist[0] == "search":
         return parseSearchCmd(cmdlist)    
-    
+
+    # If none of the above matched, reformat the command and treat it as a search
+    cmdlist.insert(0,"search")
+    return parseSearchCmd(cmdlist)
 
 
 def parseSearchCmd(cmdlist):

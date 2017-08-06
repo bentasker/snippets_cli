@@ -56,7 +56,9 @@ The upstream JSON files define whether there's a 'next' or 'previous' issue, whe
 ### General
 
     [Num] - Jump to the specified Snippet ID (e.g. 4)
+    [Search phrase] - Search snippets for phrase
     list - List all snippets in the system
+    help - Display this output
 
 
 ### Snippet View
