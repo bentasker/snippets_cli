@@ -653,7 +653,7 @@ def processCommand(cmd):
         return parseSearchCmd(cmdlist)    
 
     # If none of the above matched, reformat the command and treat it as a search
-    c = ["search", ' '.join(cmdlist[1:])]
+    c = ["search", ' '.join(cmdlist[0:])]
     return parseSearchCmd(c)
 
 
