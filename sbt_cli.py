@@ -1,6 +1,5 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-import urllib2
 import urllib
 import json
 import re
@@ -8,7 +7,7 @@ import time
 import ssl
 
 import math
-import sys, readline, os,stat,requests
+import sys, readline, os,stat
 import random
 import hashlib
 
@@ -67,7 +66,8 @@ class MemCache(dict):
     def __init__(self):
         self.storage = {}
         self.lastpurge = int(time.time())
-        self.disabled = False
+        # Temporarily disable cache - there's some work needed as part of the Py3 port to make sure all entries are of the right type, to avoid exceptions
+        self.disabled = True 
         self.config = {}
         self.config['doSelfPurge'] = False # Disabled as entries have their own TTL
         self.config['defaultTTL'] = 900 # 15 mins
@@ -88,10 +88,10 @@ class MemCache(dict):
         if not ttl:
             # Use the default TTL
             ttl = self.config['defaultTTL']
-        
+
         keyh = self.genKeyHash(key)
         now = int(time.time())
-        self.storage[keyh] = { "Value": val, "SetAt": now, "TTL" : ttl, "Origkey" : key, "Last-Use": now}
+        self.storage[keyh] = { "Value": val.decode('utf-8'), "SetAt": now, "TTL" : ttl, "Origkey" : key, "Last-Use": now}
 
 
     def getItem(self, key):
@@ -116,6 +116,7 @@ class MemCache(dict):
         
         self.storage[keyh]["Last-Use"] = int(time.time())
         return self.storage[keyh]["Value"]
+    
 
 
     def invalidate(self,key):
@@ -136,7 +137,7 @@ class MemCache(dict):
             Probably overkill, but better to have it and not need it
             
         '''
-        return hashlib.sha256("%s%s" % (self.seed,key)).hexdigest()
+        return hashlib.sha256("{}{}".format(self.seed,key).encode('utf-8')).hexdigest()
     
     
     def __getitem__(self,val):
@@ -254,16 +255,16 @@ def getJSON(url,ttl=False):
     
     
     if CACHE.config['amOffline']:
-        print "Item not in cache and we're offline"
+        print("Item not in cache and we're offline")
         return False
     
-    request = urllib2.Request(url)
+    request = urllib.request.Request(url)
     
     if ADDITIONAL_HEADERS:
         for header in ADDITIONAL_HEADERS:
             request.add_header(header['name'],header['value'])
     
-    response = urllib2.urlopen(request)
+    response = urllib.request.urlopen(request)
     jsonstr = response.read()
     #print jsonstr
     
@@ -278,7 +279,7 @@ def doTestRequest():
     '''
     url = "%s/sitemap.json" % (BASEDIR,)
     
-    request = urllib2.Request(url)
+    request = urllib.request.Request(url)
 
     
     if ADDITIONAL_HEADERS:
@@ -286,7 +287,7 @@ def doTestRequest():
             request.add_header(header['name'],header['value'])
     
     try:
-        response = urllib2.urlopen(request,timeout=5)
+        response = urllib.request.urlopen(request,timeout=5)
         jsonstr = response.read()
         
         # Check we actually got json back
@@ -358,7 +359,7 @@ def printSnippet(sid):
     urlpath = getSnippetUrlFromId(sid)
     
     if not urlpath:
-        print "NOT FOUND"
+        print("NOT FOUND")
         return False
     
     url = "%s%s" % (BASEDIR,urlpath)
@@ -367,49 +368,49 @@ def printSnippet(sid):
     snip = getJSON(url,ttl=2592000)
     
     if not snip or not snip['name']:
-        print "Snippet Not Found"
+        print("Snippet Not Found")
         return
     
     prev = CACHE.getItem('Navi-now')
     CACHE.setItem('Navi-last',prev)
     CACHE.setItem('Navi-now',sid)
 
-    print "%s: %s (%s)\n" % (sid,snip['name'],snip['lang'])
+    print("%s: %s (%s)\n" % (sid,snip['name'],snip['lang']))
     
-    print "-------------\nDetails\n-------------\n"
+    print("-------------\nDetails\n-------------\n")
     
-    print "Language: %s" % (snip['lang'],)
+    print("Language: %s" % (snip['lang'],))
     
     if "license" in snip and len(snip['license']) > 0:
-            print "License: %s" % (snip['license'],)
+            print("License: %s" % (snip['license'],))
     
     
-    print "\n-------------\nDescription\n-------------\n\n%s\n" % (snip['description'])
+    print("\n-------------\nDescription\n-------------\n\n%s\n" % (snip['description']))
 
 
     if "requires" in snip and len(snip['requires']) > 0:
-            print "-------------\nRequires\n-------------\n%s\n" % (snip['requires'],)
+            print("-------------\nRequires\n-------------\n%s\n" % (snip['requires'],))
     
 
 
     if "basedon" in snip and len(snip['basedon']) > 0:
-            print "Based On\n-------------\n\n%s\n" % (snip['basedon'],)
+            print("Based On\n-------------\n\n%s\n" % (snip['basedon'],))
     
 
     if "similar" in snip and len(snip['similar']) > 0:
-            print "Similar To\n-------------\n\n%s\n" % (snip['similar'],)
+            print("Similar To\n-------------\n\n%s\n" % (snip['similar'],))
 
 
-    print "\n-------------\nSnippet\n-------------\n\n%s" % (snip['snippet'])
+    print("\n-------------\nSnippet\n-------------\n\n%s" % (snip['snippet']))
     
     if "usage" in snip and len(snip['usage']) > 0:
-            print "-------------\nUsage Example\n-------------\n\n%s" % (snip['usage'],)
+            print("-------------\nUsage Example\n-------------\n\n%s" % (snip['usage'],))
     
     
-    print "HTML Link\n----------"
-    print "%s%s" % (BASEDIR,urlpath.replace("/json","").replace(".json",".html"))
+    print("HTML Link\n----------")
+    print("%s%s" % (BASEDIR,urlpath.replace("/json","").replace(".json",".html")))
     
-    print ''
+    print('')
 
 
 
@@ -453,7 +454,7 @@ def printSnippetList():
 
 
     if not plist:
-        print "No Results"
+        print("No Results")
         return
     
     # This is not the most efficient way to do it, but it'll do for now
@@ -461,7 +462,7 @@ def printSnippetList():
     buildSnippetIDMappings(plist['entries'])
     
     # Now output the table
-    print buildIssueTable(plist['entries'])
+    print(buildIssueTable(plist['entries']))
     
 
 
@@ -474,7 +475,7 @@ def doSnippetSearch(title=False,lang=False,similar=False,searchstring=False):
 
 
     if not plist:
-        print "No Results"
+        print("No Results")
         return
 
     buildSnippetIDMappings(plist['entries'])    
@@ -520,9 +521,9 @@ def doSnippetSearch(title=False,lang=False,similar=False,searchstring=False):
     if len(matches) == 1:
         return printSnippet(matches[0]['id'])
 
-    print "Search results - String: %s, title: %s, lang: %s, similarto: %s" % (searchstring,title,lang,similar)
+    print("Search results - String: %s, title: %s, lang: %s, similarto: %s" % (searchstring,title,lang,similar))
         
-    print buildIssueTable(matches)
+    print(buildIssueTable(matches))
 
 
     
@@ -551,30 +552,30 @@ def runInteractive(display_prompt,echo_cmd=False):
         # Trigger the periodic auto flushes
         CACHE.selfpurge()
         
-	try:
-	    readline.read_history_file(os.path.expanduser("~/.sbtcli.history"))
-	except: 
-	    pass # Ignore FileNotFoundError, history file doesn't exist
+        try:
+            readline.read_history_file(os.path.expanduser("~/.sbtcli.history"))
+        except: 
+            pass # Ignore FileNotFoundError, history file doesn't exist
 
-	while True:
-	    try:
-		command = raw_input(display_prompt)
+        while True:
+            try:
+              command = raw_input(display_prompt)
 
-	    except EOFError:
-		print("")
-		break
+            except EOFError:
+              print("")
+              break
 
-	    if command == "q":
-		break
+            if command == "q":
+              break
 
-	    elif command.startswith("#") or command == "" or command == " ":
-		continue
+            elif command.startswith("#") or command == "" or command == " ":
+              continue
 
-	    if echo_cmd:
-		print "> " + command
+            if echo_cmd:
+               print("> " + command)
 
-	    readline.write_history_file(os.path.expanduser("~/.sbtcli.history"))
-	    processCommand(command)
+            readline.write_history_file(os.path.expanduser("~/.sbtcli.history"))
+            processCommand(command)
 
 
 def processCommand(cmd):
@@ -627,7 +628,7 @@ def processCommand(cmd):
         # Navigation command to go back to the last issue viewed
         lastview = CACHE.getItem('Navi-last')
         if not lastview:
-            print "You don't seem to have viewed a snippet previously"
+            print("You don't seem to have viewed a snippet previously")
             return
         return printSnippet(lastview)
 
@@ -684,19 +685,19 @@ def parseSetCmd(cmdlist):
 
     if cmdlist[1] == "defaultttl":
         CACHE.config['defaultTTL'] = int(cmdlist[2])
-        print "Default TTL set to %s" % (cmdlist[2])
+        print("Default TTL set to %s" % (cmdlist[2]))
 
     if cmdlist[1] == "lrutarget":
         CACHE.config['LRUTarget'] = cmdlist[2]
-        print "LRU Target set to %s%" % (cmdlist[2])
+        print("LRU Target set to %s%" % (cmdlist[2]))
         
     if cmdlist[1] == "Offline":
         CACHE.config['amOffline'] = True
-        print "Offline mode enabled"
+        print("Offline mode enabled")
         
     if cmdlist[1] == "Online":
         CACHE.config['amOffline'] = False
-        print "Offline mode disabled"
+        print("Offline mode disabled")
         
 
 def parseCacheOptions(cmdlist):
@@ -715,43 +716,43 @@ def parseCacheOptions(cmdlist):
                 'Value' : CACHE.storage[entry]['Value'],
                 }
             Rows.append(p)
-        print make_table(Cols,Rows)
+        print(make_table(Cols,Rows))
 
 
     if cmdlist[1] == "fetch":
         if re.match('[A-Z]+-[0-9]+',cmdlist[2]):
             url = "%s/browse/%s.json" % (BASEDIR,cmdlist[2])
             getJSON(url)
-            print "Written to cache"
+            print("Written to cache")
             return
             
         # Fetch the specified URL 
         getJSON(cmdlist[2])
-        print "Written to cache"
+        print("Written to cache")
         return
 
     if cmdlist[1] == "LRU":
         count = CACHE.LRU()
-        print "LRU Triggered. %s items removed" % (count,)
+        print("LRU Triggered. %s items removed" % (count,))
 
 
     if cmdlist[1] == "flush":
         # Flush the cache
         CACHE.flush()
-        print "Cache flushed"
+        print("Cache flushed")
 
     if cmdlist[1] == "get":
         f = CACHE.getItem(cmdlist[2])
         if not f:
-            print "Not in Cache"
+            print("Not in Cache")
             return
         
-        print f
+        print(f)
 
 
     if cmdlist[1] == "invalidate":
         CACHE.invalidate(cmdlist[2])
-        print "Invalidated"
+        print("Invalidated")
 
 
         
@@ -766,7 +767,7 @@ def parseCacheOptions(cmdlist):
                 'Expires' : time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(CACHE.storage[entry]['SetAt'] + CACHE.storage[entry]['TTL']))
                 }
             Rows.append(p)
-        print make_table(Cols,Rows)
+        print(make_table(Cols,Rows))
 
 
     
@@ -782,7 +783,7 @@ if CACHE_TTL:
 
 
 if not doTestRequest():
-    print "Enabling Offline mode"
+    print("Enabling Offline mode")
     CACHE.setConfig('amOffline',True)
 
 
