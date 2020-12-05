@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import urllib
 import json
 import re
 import time
@@ -9,6 +8,7 @@ import ssl
 import math
 import sys, readline, os,stat
 import random
+import requests
 import hashlib
 
 from datetime import datetime, timedelta
@@ -258,19 +258,15 @@ def getJSON(url,ttl=False):
         print("Item not in cache and we're offline")
         return False
     
-    request = urllib.request.Request(url)
-    
+    headers = {}
     if ADDITIONAL_HEADERS:
         for header in ADDITIONAL_HEADERS:
-            request.add_header(header['name'],header['value'])
+            headers[header['name']] = header['value']
     
-    response = urllib.request.urlopen(request)
-    jsonstr = response.read()
-    #print jsonstr
+    response = requests.get(url,headers=headers)
+    CACHE.setItem(url,response.text,ttl=ttl)
     
-    CACHE.setItem(url,jsonstr,ttl=ttl)
-    
-    return json.loads(jsonstr)
+    return response.json()
 
 
 
@@ -279,22 +275,22 @@ def doTestRequest():
     '''
     url = "%s/sitemap.json" % (BASEDIR,)
     
-    request = urllib.request.Request(url)
-
     
+
+    headers = {}
     if ADDITIONAL_HEADERS:
         for header in ADDITIONAL_HEADERS:
-            request.add_header(header['name'],header['value'])
-    
+            headers[header['name']] = header['value']    
+            
     try:
-        response = urllib.request.urlopen(request,timeout=5)
-        jsonstr = response.read()
+        response = requests.get(url,headers=headers)
+        jsonstr = response.text
         
         # Check we actually got json back
         # Basically checking for captive portals. Though shouldn't be an issue given we're using HTTPS
         # but also helps if there's an issue with the server
 
-        s = json.loads(jsonstr)
+        s = response.json()
         
         # If we got it, update the cache
         CACHE.setItem(url,jsonstr)
