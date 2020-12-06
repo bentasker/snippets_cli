@@ -18,8 +18,7 @@ from datetime import datetime, timedelta
 BASEDIR="https://snippets.bentasker.co.uk" # No trailing slash
 AUTH=False
 ADDITIONAL_HEADERS=False
-DISKCACHE='/tmp/sbtcli.cache'
-CACHE_TTL=900 # 15 mins
+
 
 
 # I use this settings file to gain access to the non-public copy of my projects
@@ -34,12 +33,6 @@ if os.path.isfile(os.path.expanduser("~/.sbtcli.settings")):
             cfgline = x.split("=")
             if cfgline[0] == "BASEDIR":
                 BASEDIR=cfgline[1]
-
-            if cfgline[0] == "CACHE_TTL":
-                CACHE_TTL=int(cfgline[1])
-
-            if cfgline[0] == "DISKCACHE":
-                DISKCACHE=cfgline[1]
                 
             if cfgline[0] == "ADD_HEADER":
                 if not ADDITIONAL_HEADERS:
@@ -54,217 +47,15 @@ if os.path.isfile(os.path.expanduser("~/.sbtcli.settings")):
 
 SNIPPET_URLS = {}
 
-
-class MemCache(dict):
-    ''' A rudimentary in-memory cache with several storage areas and classes.
-    By default, the permstorage area will get flushed once an hour
-    
-    Filched and amended from my RequestRouter project
-    
-    '''
-    
-    def __init__(self):
-        self.storage = {}
-        self.lastpurge = int(time.time())
-        # Temporarily disable cache - there's some work needed as part of the Py3 port to make sure all entries are of the right type, to avoid exceptions
-        self.disabled = True 
-        self.config = {}
-        self.config['doSelfPurge'] = False # Disabled as entries have their own TTL
-        self.config['defaultTTL'] = 900 # 15 mins
-        self.config['amOffline'] = False # Disable Offline mode by default
-        self.config['LRUTarget'] = 0.25 # Percentage reduction target for LRUs
-        
-        # Seed hashes to try and avoid deliberate hash collisions
-        self.seed = random.getrandbits(32)
-
-
-    def setItem(self,key,val,ttl=False):
-        ''' Store an item in a specific area
-        '''
-        
-        if self.disabled:
-            return  
-        
-        if not ttl:
-            # Use the default TTL
-            ttl = self.config['defaultTTL']
-
-        keyh = self.genKeyHash(key)
-        now = int(time.time())
-        self.storage[keyh] = { "Value": val.decode('utf-8'), "SetAt": now, "TTL" : ttl, "Origkey" : key, "Last-Use": now}
-
-
-    def getItem(self, key):
-        ''' Retrieve an item. Will check each storage area for an entry with the specified key
-        '''
-        
-        if self.disabled:
-            return  False        
-        
-        keyh = self.genKeyHash(key)
-        
-        if keyh not in self.storage:
-            return False
-        
-        # Check whether the ttl has expired
-        if (int(time.time()) - self.storage[keyh]["TTL"]) > self.storage[keyh]["SetAt"]:
-            # TTL has expired. Invalidate the object and return false
-            # only if we're not currently offline though.
-            if not self.config['amOffline']:
-                self.invalidate(key)
-                return False
-        
-        self.storage[keyh]["Last-Use"] = int(time.time())
-        return self.storage[keyh]["Value"]
-    
-
-
-    def invalidate(self,key):
-        ''' Invalidate an item within the cache
-        '''
-        key = self.genKeyHash(key)
-        
-        if key not in self.storage:
-            return
-        
-        del self.storage[key]
-    
-    
-    def genKeyHash(self,key):
-        ''' Convert the supplied key into a hash
-        
-            We combine it with a seed to help make hash collision attempts harder on public facing infrastructure.
-            Probably overkill, but better to have it and not need it
-            
-        '''
-        return hashlib.sha256("{}{}".format(self.seed,key).encode('utf-8')).hexdigest()
-    
-    
-    def __getitem__(self,val):
-        ''' Magic method so that the temporary store can be accessed as if this class were a dict
-        '''
-        return self.getItem(val)
-    
-    def __setitem__(self,key,val):
-        ''' Magic method so that the temporary store can be accessed as if this class were a dict
-        '''
-        return self.setItem(key,val)
-    
-            
-    def flush(self):
-        ''' Flush the temporary storage area and response cache
-        
-        Restore anything that's been 'pre' cached
-        '''
-        del self.storage
-        self.storage = {}
-        
-        # Generate a new seed so it's harder to predict hashes
-        self.seed = random.getrandbits(32)
-        self.lastpurge = int(time.time())
-        
-        # Write the updated (and now empty) cache to disk so we don't end up reusing later
-        self.writeToDiskCache()
-
-        
-    def selfpurge(self):
-        ''' Sledgehammer for a nail. Periodically purge the permanent storage to make
-        sure we don't absorb too much memory
-        '''
-        
-        if 'doSelfPurge' in self.config and not self.config['doSelfPurge']:
-            return
-        
-        if (int(time.time()) - self.config['defaultTTL']) > self.lastpurge:
-            self.flush()
-
-
-    def LRU(self):
-        ''' Run a Least Recently Used flush on the cache storage
-        '''
-        
-        items = {}
-        
-        # Iterate over items in the cache, pulling out the cache key and when the item was last used
-        for keyh in self.storage:
-            items[keyh] = self.storage[keyh]['Last-Use']
-            
-        # Now we want to sort our dict from smallest timestamp (i.e. least recently used) to highest
-        ordered = sorted(items.items(), key=lambda x: x[1])
-
-        # That gives us a list of tuples (key,timestamp). We want to clear the first 25% (ish)
-        numitems = len(items)
-        toclear = math.ceil(numitems * self.config['LRUTarget'])
-        x = 0
-        
-        while x < toclear:
-            entry = ordered[x][0]
-            del self.storage[entry]           
-            x = x + 1
-
-        return x
-
-
-
-    def writeToDiskCache(self):
-        ''' Write a copy of the current cache out to disk
-        '''
-        
-        if "DiskCache" in self.config and self.config['DiskCache']:
-            p = {
-                    'storage' : self.storage,
-                    'lastpurge' : self.lastpurge,
-                    'seed' : self.seed
-                }
-            
-            cachejson = json.dumps(p)
-            f = open(self.config['DiskCache'],'w')
-            f.write(cachejson)
-            f.close()
-
-            
-    def loadFromDiskCache(self):
-        ''' Load previously cached values from disk (if present)
-        '''
-        
-        if "DiskCache" in self.config and self.config['DiskCache'] and os.path.isfile(self.config['DiskCache']):
-            f = open(self.config['DiskCache'],'r')
-            cache = json.load(f)
-            f.close()
-            self.storage = cache['storage']
-            self.lastpurge = cache['lastpurge']
-            self.seed = cache['seed']
-            
-
-
-    def setConfig(self,var,value):
-        ''' Set an internal config option
-        '''
-        self.config[var] = value
-
-
-
-
 def getJSON(url,ttl=False):
     #print "Fetching %s" % (url,)
-    
-    # Check whether we have it in cache
-    resp = CACHE.getItem(url)
-    if resp:
-        return json.loads(resp)
-    
-    
-    if CACHE.config['amOffline']:
-        print("Item not in cache and we're offline")
-        return False
-    
+        
     headers = {}
     if ADDITIONAL_HEADERS:
         for header in ADDITIONAL_HEADERS:
             headers[header['name']] = header['value']
     
     response = requests.get(url,headers=headers)
-    CACHE.setItem(url,response.text,ttl=ttl)
     
     return response.json()
 
@@ -274,8 +65,6 @@ def doTestRequest():
     ''' Place a test request to work out whether we've got connectivity or not 
     '''
     url = "%s/sitemap.json" % (BASEDIR,)
-    
-    
 
     headers = {}
     if ADDITIONAL_HEADERS:
@@ -289,14 +78,8 @@ def doTestRequest():
         # Check we actually got json back
         # Basically checking for captive portals. Though shouldn't be an issue given we're using HTTPS
         # but also helps if there's an issue with the server
-
-        s = response.json()
-        
-        # If we got it, update the cache
-        CACHE.setItem(url,jsonstr)
-        
+        s = response.json()        
         return True
-    
     except:
         return False
 
@@ -367,10 +150,6 @@ def printSnippet(sid):
         print("Snippet Not Found")
         return
     
-    prev = CACHE.getItem('Navi-now')
-    CACHE.setItem('Navi-last',prev)
-    CACHE.setItem('Navi-now',sid)
-
     print("%s: %s (%s)\n" % (sid,snip['name'],snip['lang']))
     
     print("-------------\nDetails\n-------------\n")
@@ -437,8 +216,6 @@ def buildSnippetIDMappings(snippets):
         dictkey = 'snip-%s' % (sn['id'],)
         if dictkey not in SNIPPET_URLS:
             SNIPPET_URLS[dictkey] = sn['href']
-            
-    CACHE.setItem('id-mappings',SNIPPET_URLS, ttl=99999999)
     
     
     
@@ -545,9 +322,6 @@ def buildIssueTable(issues):
 # CLI related functions begin
 def runInteractive(display_prompt,echo_cmd=False):
     
-        # Trigger the periodic auto flushes
-        CACHE.selfpurge()
-        
         try:
             readline.read_history_file(os.path.expanduser("~/.sbtcli.history"))
         except: 
@@ -620,19 +394,8 @@ def processCommand(cmd):
             cmdlist.append(entry.rstrip())
 
 
-    if cmdlist[0] == 'p' or cmdlist[0] == 'back':
-        # Navigation command to go back to the last issue viewed
-        lastview = CACHE.getItem('Navi-last')
-        if not lastview:
-            print("You don't seem to have viewed a snippet previously")
-            return
-        return printSnippet(lastview)
-
     if cmdlist[0] == "snippet":
         return printSnippet(cmdlist[1])
-
-    if cmdlist[0] == "cache":
-        return parseCacheOptions(cmdlist)
     
     if cmdlist[0] == "list":
         # TODO - change this to be snippets related
@@ -641,10 +404,6 @@ def processCommand(cmd):
     if cmdlist[0] == "lang":
         # TODO - change this to be snippets related
         return doSnippetSearch(lang=cmdlist[1])
-    
-    
-    if cmdlist[0] == "set":
-        return parseSetCmd(cmdlist)
     
     if cmdlist[0] == "search":
         return parseSearchCmd(cmdlist)    
@@ -672,122 +431,6 @@ def parseSearchCmd(cmdlist):
     return doSnippetSearch(searchstring=cmdlist[1])
 
 
-
-
-def parseSetCmd(cmdlist):
-    ''' Used to set various internals
-    '''
-
-
-    if cmdlist[1] == "defaultttl":
-        CACHE.config['defaultTTL'] = int(cmdlist[2])
-        print("Default TTL set to %s" % (cmdlist[2]))
-
-    if cmdlist[1] == "lrutarget":
-        CACHE.config['LRUTarget'] = cmdlist[2]
-        print("LRU Target set to %s%" % (cmdlist[2]))
-        
-    if cmdlist[1] == "Offline":
-        CACHE.config['amOffline'] = True
-        print("Offline mode enabled")
-        
-    if cmdlist[1] == "Online":
-        CACHE.config['amOffline'] = False
-        print("Offline mode disabled")
-        
-
-def parseCacheOptions(cmdlist):
-    ''' Utility functions to aid troubleshooting if the cache causes any headaches
-    '''
-    
-    if cmdlist[1] == "dump":
-        # Dump the contents of the cache
-        Cols = ['Key','Expires','Value']
-        Rows = []
-        
-        for entry in CACHE.storage:
-            p = {
-                'Key' : CACHE.storage[entry]['Origkey'],
-                'Expires' : time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(CACHE.storage[entry]['SetAt'] + CACHE.storage[entry]['TTL'])),
-                'Value' : CACHE.storage[entry]['Value'],
-                }
-            Rows.append(p)
-        print(make_table(Cols,Rows))
-
-
-    if cmdlist[1] == "fetch":
-        if re.match('[A-Z]+-[0-9]+',cmdlist[2]):
-            url = "%s/browse/%s.json" % (BASEDIR,cmdlist[2])
-            getJSON(url)
-            print("Written to cache")
-            return
-            
-        # Fetch the specified URL 
-        getJSON(cmdlist[2])
-        print("Written to cache")
-        return
-
-    if cmdlist[1] == "LRU":
-        count = CACHE.LRU()
-        print("LRU Triggered. %s items removed" % (count,))
-
-
-    if cmdlist[1] == "flush":
-        # Flush the cache
-        CACHE.flush()
-        print("Cache flushed")
-
-    if cmdlist[1] == "get":
-        f = CACHE.getItem(cmdlist[2])
-        if not f:
-            print("Not in Cache")
-            return
-        
-        print(f)
-
-
-    if cmdlist[1] == "invalidate":
-        CACHE.invalidate(cmdlist[2])
-        print("Invalidated")
-
-
-        
-    if cmdlist[1] == "print":
-        # Print a list of keys and when they expire
-        Cols = ['Key','Expires']
-        Rows = []
-        
-        for entry in CACHE.storage:
-            p = {
-                'Key' : CACHE.storage[entry]['Origkey'],
-                'Expires' : time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(CACHE.storage[entry]['SetAt'] + CACHE.storage[entry]['TTL']))
-                }
-            Rows.append(p)
-        print(make_table(Cols,Rows))
-
-
-    
-    
-
-CACHE = MemCache()
-if DISKCACHE:
-    CACHE.setConfig('DiskCache',DISKCACHE)
-    CACHE.loadFromDiskCache()
-
-if CACHE_TTL:
-    CACHE.setConfig('defaultTTL',CACHE_TTL)
-
-
-if not doTestRequest():
-    print("Enabling Offline mode")
-    CACHE.setConfig('amOffline',True)
-
-
-cachedmappings = CACHE.getItem('id-mappings')
-if cachedmappings:
-    SNIPPET_URLS = cachedmappings
-
-
 if __name__ == "__main__":
     if len(sys.argv) < 2:
             # Launch interactive mode
@@ -802,11 +445,6 @@ if __name__ == "__main__":
                     echo_cmd = False
 
             runInteractive(display_prompt,echo_cmd)
-
-            # Save the most recent view history
-            lastview = CACHE.getItem('Navi-now')
-            CACHE.setItem('Navi-last',lastview, ttl=99999999)
-            CACHE.writeToDiskCache()
             sys.exit()
 
 
@@ -820,7 +458,7 @@ if __name__ == "__main__":
         
     command=" ".join(sys.argv[1:])
     processCommand(command)
-    CACHE.writeToDiskCache()
+
 
 
 
