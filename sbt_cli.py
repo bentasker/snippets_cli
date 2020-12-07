@@ -2,17 +2,8 @@
 
 import json
 import re
-import time
-import ssl
-
-import math
 import sys, readline, os,stat
-import random
 import requests
-import hashlib
-
-from datetime import datetime, timedelta
-
 
 
 BASEDIR="https://snippets.bentasker.co.uk" # No trailing slash
