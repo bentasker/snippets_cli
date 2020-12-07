@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 BASEDIR="https://snippets.bentasker.co.uk" # No trailing slash
 AUTH=False
 ADDITIONAL_HEADERS=False
-
+UPDATE_ANALYTICS=True
 
 
 # I use this settings file to gain access to the non-public copy of my projects
@@ -46,6 +46,35 @@ if os.path.isfile(os.path.expanduser("~/.sbtcli.settings")):
 
 
 SNIPPET_URLS = {}
+
+
+def updateAnalytics(pgview):
+    ''' Send a ping to Piwik
+    
+    This helps me track which snippets people actually find useful.
+    
+    A flag to disable this will be provided later
+    '''
+
+    if not UPDATE_ANALYTICS:
+        return False
+
+    url = 'https://piwik.bentasker.co.uk/piwik.php'
+
+    headers = {
+        "User-agent": "sbt_cli",
+        "Referer": pgview
+        }
+    
+    params = {
+        "idsite":"1",
+        "rec":"1",
+        "url": pgview
+        }
+    
+    response = requests.get(url,headers=headers,params=params)
+
+
 
 def getJSON(url,ttl=False):
     #print "Fetching %s" % (url,)
@@ -183,9 +212,12 @@ def printSnippet(sid):
     
     
     print("HTML Link\n----------")
-    print("%s%s" % (BASEDIR,urlpath.replace("/json","").replace(".json",".html")))
+    pageurl = "{}{}".format(BASEDIR,urlpath.replace("/json","").replace(".json",".html"))
+    print(pageurl)
     
     print('')
+    updateAnalytics(pageurl)
+    
 
 
 
@@ -236,6 +268,7 @@ def printSnippetList():
     
     # Now output the table
     print(buildIssueTable(plist['entries']))
+    updateAnalytics(BASEDIR.replace("/json",""))
     
 
 
@@ -297,6 +330,9 @@ def doSnippetSearch(title=False,lang=False,similar=False,searchstring=False):
     print("Search results - String: %s, title: %s, lang: %s, similarto: %s" % (searchstring,title,lang,similar))
         
     print(buildIssueTable(matches))
+
+    search_page = "{}/search.html#srchtrm={}&_=_&srchfields=TSKD&searchLang=ANY".format(BASEDIR.replace("/json",""),searchstring)
+    updateAnalytics(search_page)
 
 
     

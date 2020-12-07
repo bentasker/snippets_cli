@@ -19,6 +19,15 @@ It's currently *very* rough and ready.
 
 
 
+### Analytics
+
+By default, the script will make a call to my Analytics system - this allows me to see things that people are either finding useful or are searching for so that I can improve the snippets collection. In order to disable this analytics call, just set
+
+    UPDATE_ANALYTICS=False
+    
+toward the top of `sbt_cli.py`
+
+
 ## Usage
 
 
